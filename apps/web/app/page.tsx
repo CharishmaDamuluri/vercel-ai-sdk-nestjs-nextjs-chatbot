@@ -1,102 +1,269 @@
-import Image, { type ImageProps } from "next/image";
-import { Button } from "@repo/ui/button";
-import styles from "./page.module.css";
+"use client";
 
-type Props = Omit<ImageProps, "src"> & {
-  srcLight: string;
-  srcDark: string;
-};
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+import { useEffect, useRef, useState } from "react";
 
-const ThemeImage = (props: Props) => {
-  const { srcLight, srcDark, ...rest } = props;
-
-  return (
-    <>
-      <Image {...rest} src={srcLight} className="imgLight" />
-      <Image {...rest} src={srcDark} className="imgDark" />
-    </>
-  );
+type GatewayModel = {
+  id: string;
+  name: string;
 };
 
 export default function Home() {
-  return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <ThemeImage
-          className={styles.logo}
-          srcLight="turborepo-dark.svg"
-          srcDark="turborepo-light.svg"
-          alt="Turborepo logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol>
-          <li>
-            Get started by editing <code>apps/web/app/page.tsx</code>
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [models, setModels] = useState<GatewayModel[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
 
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new/clone?demo-description=Learn+to+implement+a+monorepo+with+a+two+Next.js+sites+that+has+installed+three+local+packages.&demo-image=%2F%2Fimages.ctfassets.net%2Fe5382hct74si%2F4K8ZISWAzJ8X1504ca0zmC%2F0b21a1c6246add355e55816278ef54bc%2FBasic.png&demo-title=Monorepo+with+Turborepo&demo-url=https%3A%2F%2Fexamples-basic-web.vercel.sh%2F&from=templates&project-name=Monorepo+with+Turborepo&repository-name=monorepo-turborepo&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fturborepo%2Ftree%2Fmain%2Fexamples%2Fbasic&root-directory=apps%2Fdocs&skippable-integrations=1&teamSlug=vercel&utm_source=create-turbo"
-            target="_blank"
-            rel="noopener noreferrer"
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (
+        modelMenuRef.current &&
+        !modelMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsModelMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        setModelsLoading(true);
+        setModelsError(null);
+        const response = await fetch("/api/chat/models");
+        if (!response.ok) {
+          throw new Error(`Failed to load models (${response.status})`);
+        }
+
+        const data = (await response.json()) as GatewayModel[];
+        setModels(data);
+
+        if (data.length > 0) {
+          setSelectedModel(
+            (current) => current || (data[0] && data[0].id) || "",
+          );
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to load models";
+        setModelsError(message);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
+
+    void loadModels();
+  }, []);
+
+  const { messages, sendMessage, regenerate, status } = useChat({
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: () => ({ model: selectedModel }),
+    }),
+  });
+  const [input, setInput] = useState("");
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const selectedModelLabel =
+    models.find((model) => model.id === selectedModel)?.name || selectedModel;
+
+  const getMessageText = (parts: readonly { type: string; text?: string }[]) => {
+    return parts
+      .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
+      .filter(Boolean)
+      .join("\n");
+  };
+
+  return (
+    <div className="flex flex-col h-screen max-w-3xl mx-auto p-4">
+      <div className="mb-4">
+        {/* Model selector */}
+        <label
+          htmlFor="model-input"
+          className="block text-sm font-medium text-gray-400 mb-2"
+        >
+          Model
+        </label>
+        <div ref={modelMenuRef} className="relative">
+          <button
+            id="model-input"
+            type="button"
+            disabled={modelsLoading || models.length === 0}
+            onClick={() => setIsModelMenuOpen((open) => !open)}
+            className="w-full h-9 px-3 text-left text-sm bg-gray-900 border border-gray-700 rounded-lg text-white disabled:opacity-60 truncate"
           >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            href="https://turborepo.dev/docs?utm_source"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.secondary}
-          >
-            Read our docs
-          </a>
+            {modelsLoading
+              ? "Loading models..."
+              : selectedModelLabel || "Select model"}
+          </button>
+
+          {isModelMenuOpen && !modelsLoading && models.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full bg-gray-900 border border-gray-700 rounded-lg shadow-lg">
+              <ul className="max-h-48 overflow-y-auto py-1">
+                {models.map((model) => (
+                  <li key={model.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedModel(model.id);
+                        setIsModelMenuOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-800 ${selectedModel === model.id ? "bg-gray-800" : ""}`}
+                    >
+                      {model.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
-        <Button appName="web" className={styles.secondary}>
-          Open alert
-        </Button>
-      </main>
-      <footer className={styles.footer}>
-        <a
-          href="https://vercel.com/templates?search=turborepo&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+        {modelsError && (
+          <p className="mt-2 text-sm text-red-400">{modelsError}</p>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto mb-4 space-y-4">
+        {/* Messages */}
+        {messages.length === 0 && (
+          <div className="text-center text-gray-400 mt-8">
+            Start a conversation by typing something below
+          </div>
+        )}
+        {messages.map((op) => (
+          <div
+            id={op.id}
+            key={op.id}
+            className={`flex ${op.role === "user" ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className={`max-w-[80%] rounded-lg px-4 py-2 ${op.role === "user" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-100"}`}
+            >
+              <div className="text-xs font-semibold mb-1 opacity-70 flex items-center justify-between gap-3">
+                <span>{op.role === "user" ? "You" : "Assistant"}</span>
+                {op.role === "assistant" && (
+                  <div className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await regenerate({
+                          messageId: op.id,
+                          body: { model: selectedModel },
+                        });
+                      }}
+                      disabled={status !== "ready" || !selectedModel}
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Regenerate response"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="h-3.5 w-3.5"
+                      >
+                        <path d="M21 12a9 9 0 1 1-3-6.7" />
+                        <polyline points="21 3 21 9 15 9" />
+                      </svg>
+                      Regenerate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const text = getMessageText(op.parts);
+                        if (!text) return;
+
+                        await navigator.clipboard.writeText(text);
+                        setCopiedMessageId(op.id);
+                        setTimeout(() => setCopiedMessageId(null), 1200);
+                      }}
+                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] hover:bg-gray-700 transition-colors"
+                      title="Copy response"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="h-3.5 w-3.5"
+                      >
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                      {copiedMessageId === op.id ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                {op.parts.map((part, index) => {
+                  if (part.type === "text") {
+                    return (
+                      <div key={index} className="whitespace-pre-wrap">
+                        {part.text}
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {status !== "ready" && (
+          <div className="flex justify-start">
+            <div className="bg-gray-800 text-gray-100 rounded-lg px-4 py-2">
+              <div className="flex items-center space-x-2">
+                <div
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                ></div>
+                <div
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                ></div>
+                <div
+                  className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                ></div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (input.trim()) {
+            sendMessage({ text: input }, { body: { model: selectedModel } });
+            setInput("");
+          }
+        }}
+        className="flex gap-2"
+      >
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type your message..."
+          className="flex-1 px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500"
+        />
+        <button
+          type="submit"
+          disabled={status !== "ready" || !input.trim() || !selectedModel}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          href="https://turborepo.dev?utm_source=create-turbo"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to turborepo.dev →
-        </a>
-      </footer>
+          Send
+        </button>
+      </form>
     </div>
   );
 }
