@@ -9,12 +9,17 @@
     "check-types": "turbo run check-types"
   },
   "devDependencies": {
+    "@types/node": "^25.2.3",
     "prettier": "^3.7.4",
     "turbo": "^2.8.3",
     "typescript": "5.9.2"
   },
   "packageManager": "pnpm@9.0.0",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.4.0",
+    "prisma": "^7.4.0"
   }
 }
